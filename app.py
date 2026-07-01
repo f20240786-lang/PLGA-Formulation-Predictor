@@ -19,10 +19,8 @@ def load_all_assets():
         "Support Vector Regressor": joblib.load('svr_model.pkl'),
         "XGBoost Regressor": joblib.load('xgb_model.pkl')
     }
-    # Load your dataset directly (Make sure NP_dataset.csv is uploaded to your GitHub repository)
     try:
         df = pd.read_csv('NP_dataset.csv')
-        # We limit to your 137 training rows as specified
         df_subset = df.iloc[:137].copy()
     except Exception as e:
         st.error(f"⚠️ Could not load NP_dataset.csv from repository! Error: {e}")
@@ -76,51 +74,61 @@ with tab1:
     st.metric(label="Predicted Particle Size", value=f"{predicted_val:.2f} nm")
 
 # =====================================================================
-# TAB 2: BAYESIAN INVERSE DESIGN (FULLY AUTOMATED DATASET LOOKUP)
+# TAB 2: HYBRID BAYESIAN DESIGNER (AUTO-LOOKUP + MANUAL CUSTOMIZATION)
 # =====================================================================
 with tab2:
     st.subheader("🎯 Inverse-Design a Brand New Formulation")
-    st.write("Select a target row or drug signature directly from your dataset. The engine will extract the molecular constraints automatically.")
+    st.write("Select an existing drug configuration or manually input completely new molecular metrics below.")
 
     opt_model_name = st.selectbox("Choose baseline model for optimization evaluation:", options=list(all_models.keys()), key="opt_model")
     target_size = st.number_input("Enter Target Particle Size (nm):", min_value=85.0, max_value=335.0, value=211.0)
 
+    st.markdown("#### 💊 Step 1: Establish Your Drug Molecule Parameters")
+    
+    # 1. Create a hybrid option list
+    dropdown_options = ["✨ Type Custom Molecule Properties Manually"]
     if df_clean is not None:
-        st.markdown("#### 💊 Step 1: Select Your Drug Molecule from the Dataset")
-        
-        # Create a clean selector showing unique molecular weights from your 137 rows
-        unique_drugs = df_clean['mol_MW'].unique()
-        selected_mw = st.selectbox("Choose Drug Molecular Weight (g/mol):", options=unique_drugs)
-        
-        # Pull the exact first row matching that drug to extract its chemical properties
-        drug_properties = df_clean[df_clean['mol_MW'] == selected_mw].iloc[0]
-        
-        # Display the locked values to the user so they see the AI loaded them correctly
-        st.info(f"🧬 Loaded Properties for Drug ({selected_mw} g/mol):\n"
-                f"• LogP: {drug_properties['mol_logP']}  "
-                f"• TPSA: {drug_properties['mol_TPSA']} Å²  "
-                f"• Melting Point: {drug_properties['mol_melting_point']} °C\n"
-                f"• H-Acceptors: {int(drug_properties['mol_Hacceptors'])}  "
-                f"• H-Donors: {int(drug_properties['mol_Hdonors'])}  "
-                f"• Heteroatoms: {int(drug_properties['mol_heteroatoms'])}")
-        
-        # Map the values to our optimization variables
-        opt_m_mw = drug_properties['mol_MW']
-        opt_m_logp = drug_properties['mol_logP']
-        opt_m_tpsa = drug_properties['mol_TPSA']
-        opt_m_mp = drug_properties['mol_melting_point']
-        opt_m_ha = drug_properties['mol_Hacceptors']
-        opt_m_hd = drug_properties['mol_Hdonors']
-        opt_m_het = drug_properties['mol_heteroatoms']
-        opt_s_pol = drug_properties['solvent_polarity_index']
+        # Add historical molecular weights to the menu list
+        historical_mws = sorted(df_clean['mol_MW'].unique())
+        dropdown_options.extend([f"Use Dataset Drug Signature (MW: {mw} g/mol)" for mw in historical_mws])
 
+    selected_mode = st.selectbox("Select Drug Selection Mode:", options=dropdown_options)
+
+    # 2. Determine base baseline defaults based on selection mode
+    if selected_mode == "✨ Type Custom Molecule Properties Manually":
+        # Global dataset averages work as safe initial text box defaults
+        init_mw, init_logp, init_tpsa, init_mp, init_ha, init_hd, init_het, init_spol = 430.0, 2.8, 95.0, 152.0, 5, 2, 7, 5.1
+        st.caption("📝 Inputs unlocked! Change the values below to evaluate an entirely unlisted drug compound.")
     else:
-        st.warning("Dataset not found. Falling back to manual input placeholders.")
-        opt_m_mw = st.number_input("Drug Molecular Weight (g/mol)", value=430.0)
-        opt_m_logp, opt_m_tpsa, opt_m_mp, opt_m_ha, opt_m_hd, opt_m_het, opt_s_pol = 2.8, 95.0, 152.0, 5, 2, 7, 5.1
+        # Extract the pure numeric MW string from the chosen option label
+        parsed_mw = float(selected_mode.split("MW: ")[1].split(" g/mol")[0])
+        drug_row = df_clean[df_clean['mol_MW'] == parsed_mw].iloc[0]
+        
+        init_mw = drug_row['mol_MW']
+        init_logp = drug_row['mol_logP']
+        init_tpsa = drug_row['mol_TPSA']
+        init_mp = drug_row['mol_melting_point']
+        init_ha = int(drug_row['mol_Hacceptors'])
+        init_hd = int(drug_row['mol_Hdonors'])
+        init_het = int(drug_row['mol_heteroatoms'])
+        init_spol = drug_row['solvent_polarity_index']
+        st.success(f"🔒 Row properties successfully fetched from your dataset file!")
+
+    # 3. Create the numeric entry widgets (they automatically respond to the chosen mode values!)
+    col1, col2 = st.columns(2)
+    with col1:
+        opt_m_mw = st.number_input("Drug Molecular Weight (g/mol)", value=init_mw, key="opt_val_mw")
+        opt_m_logp = st.number_input("Drug LogP", value=init_logp, key="opt_val_logp")
+        opt_m_tpsa = st.number_input("Drug TPSA (Å²)", value=init_tpsa, key="opt_val_tpsa")
+        opt_m_mp = st.number_input("Melting Point (°C)", value=init_mp, key="opt_val_mp")
+    with col2:
+        opt_m_ha = st.number_input("H-Bond Acceptors", value=int(init_ha), key="opt_val_ha")
+        opt_m_hd = st.number_input("H-Bond Donors", value=int(init_hd), key="opt_val_hd")
+        opt_m_het = st.number_input("Heteroatoms Count", value=int(init_het), key="opt_val_het")
+        opt_s_pol = st.number_input("Solvent Polarity Index", value=init_spol, key="opt_val_spol")
 
     # Optional Lab Constraint Feature
-    st.markdown("#### 🔒 Step 2: Optional Laboratory Constraints")
+    st.markdown("#### 🔒 Step 2: Laboratory Resource Constraints")
     lock_polymer = st.checkbox("Force the engine to use a specific Polymer Molecular Weight (kDa)")
     if lock_polymer:
         fixed_poly_val = st.number_input("Specify Available Polymer MW (kDa):", min_value=2.4, max_value=98.0, value=45.0)
@@ -191,3 +199,4 @@ with tab2:
                 ]
             })
             st.table(recipe_df)
+            
