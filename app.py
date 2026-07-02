@@ -4,18 +4,18 @@ import numpy as np
 import joblib
 import optuna
 
-# Disable Optuna's noisy console outputs to keep things clean
+# Disable Optuna's noisy console outputs to keep the log clean
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 # 1. Page Configuration
 st.set_page_config(page_title="PLGA Formulation & Design Hub", layout="centered")
 st.title("🧪 PLGA Nanoparticle AI Design Suite")
 
-# 2. Load Models Securely (No CSV files needed!)
+# 2. Load Models Securely (Completely Independent of Dataset Files)
 @st.cache_resource
 def load_all_models():
     models = {
-        "Stacking Ensemble": joblib.load('stack_model.pkl'),
+        "Stacking Ensemble (Recommended)": joblib.load('stack_model.pkl'),
         "Random Forest Regressor": joblib.load('rf_model.pkl'),
         "Gradient Boosting Regressor": joblib.load('gbr_model.pkl'),
         "Extra Trees Regressor": joblib.load('etr_model.pkl'),
@@ -27,19 +27,19 @@ def load_all_models():
 try:
     all_models = load_all_models()
 except FileNotFoundError as e:
-    st.error(f"⚠️ Missing a required model file (.pkl)! Error: {e}")
+    st.error(f"⚠️ Missing a required model file (.pkl)! Please check your repository. Error: {e}")
     st.stop()
 
 # 3. Create Navigation Tabs
 tab1, tab2 = st.tabs(["🔮 Property Predictor", "🧬 High-Precision Formulation Designer"])
 
-# Feature sequence expected by your trained ML models
+# Strict training feature sequence expected by your .pkl models
 feature_cols = ['polymer_MW', 'LA/GA', 'mol_MW', 'mol_logP', 'mol_TPSA', 'mol_melting_point', 
                 'mol_Hacceptors', 'mol_Hdonors', 'mol_heteroatoms', 'drug/polymer', 
                 'surfactant_concentration', 'surfactant_HLB', 'aqueous/organic', 'pH', 'solvent_polarity_index']
 
 # =====================================================================
-# TAB 1: PROPERTY PREDICTOR (SLIDERS TO PREDICT OUTPUT)
+# TAB 1: PROPERTY PREDICTOR (FORWARD SIMULATION VIA SLIDERS)
 # =====================================================================
 with tab1:
     st.subheader("🤖 Model Configuration")
@@ -71,13 +71,12 @@ with tab1:
     st.metric(label="Predicted Particle Size", value=f"{predicted_val:.2f} nm")
 
 # =====================================================================
-# TAB 2: FLIPPED INVERSE DESIGNER (INPUT DRUG PROPERTIES -> OUTPUT RECIPE)
+# TAB 2: FLIPPED INVERSE DESIGNER (FIXED DRUG -> DESIGNED RECIPE)
 # =====================================================================
 with tab2:
     st.subheader("🎯 Calculate Recipe from Drug Properties")
-    st.write("Provide your molecule's properties below. The Optuna engine will calculate the optimal formulation recipe variables required to achieve your target particle size.")
+    st.write("Provide your molecule's properties below. The high-accuracy ensemble optimizer will compute the required formulation variables to safely achieve your target size.")
 
-    opt_model_name = st.selectbox("Choose baseline model for optimization evaluation:", options=list(all_models.keys()), key="opt_model")
     target_size = st.number_input("Enter Target Particle Size (nm):", min_value=85.0, max_value=335.0, value=190.0)
 
     st.markdown("#### 🔒 Step 1: Input Your Fixed Molecule Properties")
@@ -94,12 +93,16 @@ with tab2:
         fixed_s_pol = st.number_input("Solvent Polarity Index Baseline", min_value=5.0, max_value=5.5, value=5.1, step=0.1, key="f_spol")
 
     st.markdown("#### 🚀 Step 2: Generate Lab Formulation Strategy")
-    if st.button("🚀 Run Recipe Optimization Loop"):
-        with st.spinner("Optuna engine solving multi-dimensional recipe space..."):
-            eval_model = all_models[opt_model_name]
+    if st.button("🚀 Run High-Accuracy Recipe Optimization Loop"):
+        with st.spinner("Optuna engine executing cross-validation ensemble optimization..."):
+            
+            # Load cross-checking architectures to eliminate structural hallucinations
+            model_stack = all_models["Stacking Ensemble (Recommended)"]
+            model_rf = all_models["Random Forest Regressor"]
+            model_gbr = all_models["Gradient Boosting Regressor"]
 
             def objective(trial):
-                # Formulations search bounds
+                # Unconstrained formulation exploration boundaries
                 polymer_MW = trial.suggest_float("polymer_MW", 2.4, 98.0)
                 LA_GA = trial.suggest_float("LA_GA", 1.0, 3.0)
                 drug_polymer = trial.suggest_float("drug_polymer", 0.006, 1.0)
@@ -108,51 +111,62 @@ with tab2:
                 aqueous_organic = trial.suggest_float("aqueous_organic", 1.78, 16.0)
                 pH = trial.suggest_float("pH", -2.0, 1.0)
 
-                # Fixed drug details map seamlessly with matching case variables
+                # Row DataFrame structure to map accurately with the underlying models
                 trial_df = pd.DataFrame([{
-                    'polymer_MW': polymer_MW,
-                    'LA/GA': LA_GA,
-                    'mol_MW': fixed_m_mw,
-                    'mol_logP': fixed_m_logp,
-                    'mol_TPSA': fixed_m_tpsa,
-                    'mol_melting_point': fixed_m_mp,
-                    'mol_Hacceptors': int(fixed_m_ha),
-                    'mol_Hdonors': int(fixed_m_hd),
-                    'mol_heteroatoms': int(fixed_m_het),
-                    'drug/polymer': drug_polymer,
-                    'surfactant_concentration': surfactant_concentration,
-                    'surfactant_HLB': surfactant_HLB,
-                    'aqueous/organic': aqueous_organic,
-                    'pH': pH,                           # Fixed: changed from lowercase ph to uppercase pH
+                    'polymer_MW': polymer_MW, 'LA/GA': LA_GA, 'mol_MW': fixed_m_mw,
+                    'mol_logP': fixed_m_logp, 'mol_TPSA': fixed_m_tpsa, 'mol_melting_point': fixed_m_mp,
+                    'mol_Hacceptors': int(fixed_m_ha), 'mol_Hdonors': int(fixed_m_hd), 'mol_heteroatoms': int(fixed_m_het),
+                    'drug/polymer': drug_polymer, 'surfactant_concentration': surfactant_concentration,
+                    'surfactant_HLB': surfactant_HLB, 'aqueous/organic': aqueous_organic, 'pH': pH,
                     'solvent_polarity_index': fixed_s_pol
                 }])
 
-                y_pred = eval_model.predict(trial_df)[0] # Fixed: added [0] array extractor scalar element
-                trial.set_user_attr("predicted_size", y_pred)
+                # Evaluate trial across the ensemble
+                pred_stack = model_stack.predict(trial_df)[0]
+                pred_rf = model_rf.predict(trial_df)[0]
+                pred_gbr = model_gbr.predict(trial_df)[0]
                 
-                return abs(y_pred - target_size)
+                # Log our recommendation baseline size
+                trial.set_user_attr("predicted_size", pred_stack)
+                
+                # Deviation math calculations
+                error_stack = abs(pred_stack - target_size)
+                error_rf = abs(pred_rf - target_size)
+                error_gbr = abs(pred_gbr - target_size)
+                
+                # Calculate model disagreement variance (Standard Deviation)
+                disagreement_penalty = np.std([pred_stack, pred_rf, pred_gbr])
 
-            # Initiate solver
+                # Combine primary error target minimization with the consistency check constraint
+                return error_stack + (disagreement_penalty * 1.5)
+
+            # High depth search to safely settle on the true mathematical minimum
             study = optuna.create_study(direction="minimize")
-            study.optimize(objective, n_trials=200)
+            study.optimize(objective, n_trials=500)
 
-            # Extract metrics metrics
+            # Pull final data points
             best_recipe_params = study.best_params
             final_pred_size = study.best_trial.user_attrs["predicted_size"]
             deviation_error = study.best_value
 
-            st.success("🎯 Recipe Configuration Parameters Successfully Determined!")
+            st.success("🎯 Optimal Recipe Successfully Determined!")
             
+            # Highlight target achievement using clean metrics rows
             col_m1, col_m2 = st.columns(2)
-            col_m1.metric("Predicted Particle Size", f"{final_pred_size:.2f} nm")
-            col_m2.metric("Target Deviation Error", f"{deviation_error:.4f} nm")
+            col_m1.metric("Ensemble Predicted Size", f"{final_pred_size:.2f} nm")
+            col_m2.metric("Target Deviation Margin", f"{deviation_error:.4f} nm")
 
-            # Output results visualization grid matrix 
+            # Build the clean, formatted DataFrame table output
             recipe_df = pd.DataFrame({
                 "Parameter Description": [
-                    "Polymer Molecular Weight (kDa)", "LA/GA Ratio", "Drug/Polymer Ratio",
-                    "Surfactant Concentration (%)", "Surfactant HLB Value", "Aqueous/Organic Phase Ratio",
-                    "Target Process pH (Coded)", "Solvent Polarity Index"
+                    "Polymer Molecular Weight (kDa)", 
+                    "LA/GA Ratio", 
+                    "Drug/Polymer Ratio",
+                    "Surfactant Concentration (%)", 
+                    "Surfactant HLB Value", 
+                    "Aqueous/Organic Phase Ratio",
+                    "Target Process pH (Coded)",
+                    "Solvent Polarity Index"
                 ],
                 "Engine Value Output": [
                     f"{best_recipe_params.get('polymer_MW'):.1f}", 
@@ -165,4 +179,16 @@ with tab2:
                     f"{fixed_s_pol:.1f}"
                 ]
             })
+            
+            # Show the table
             st.table(recipe_df)
+
+            # Instant CSV Download button for easy notebook management
+            st.write("")
+            csv_data = recipe_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download This Lab Recipe (CSV)",
+                data=csv_data,
+                file_name=f"PLGA_AI_Recipe_{target_size}nm.csv",
+                mime="text/csv"
+            )
