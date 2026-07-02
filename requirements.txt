@@ -6,3 +6,4 @@ joblib
 xgboost
 scipy
 bayesian-optimization==1.4.3
+optuna
