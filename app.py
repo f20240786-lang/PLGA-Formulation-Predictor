@@ -15,7 +15,7 @@ st.title("🧪 PLGA Nanoparticle AI Design Suite")
 @st.cache_resource
 def load_all_models():
     models = {
-        "Stacking Ensemble (Recommended)": joblib.load('stack_model.pkl'),
+        "Stacking Ensemble": joblib.load('stack_model.pkl'),
         "Random Forest Regressor": joblib.load('rf_model.pkl'),
         "Gradient Boosting Regressor": joblib.load('gbr_model.pkl'),
         "Extra Trees Regressor": joblib.load('etr_model.pkl'),
