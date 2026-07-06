@@ -97,7 +97,7 @@ with tab2:
         with st.spinner("Optuna engine executing cross-validation ensemble optimization..."):
             
             # Load cross-checking architectures to eliminate structural hallucinations
-            model_stack = all_models["Stacking Ensemble (Recommended)"]
+            model_stack = all_models["Stacking Ensemble"]
             model_rf = all_models["Random Forest Regressor"]
             model_gbr = all_models["Gradient Boosting Regressor"]
 
