@@ -263,4 +263,113 @@ with tab2:
         fixed_m_mw = st.number_input("Drug Molecular Weight (g/mol)", min_value=100.0, max_value=1200.0, value=392.41, key="inv_mw")
         fixed_m_logp = st.number_input("Drug LogP value", min_value=-2.0, max_value=6.0, value=2.08, key="inv_logp")
         fixed_m_tpsa = st.number_input("Drug TPSA (Å²)", min_value=10.0, max_value=350.0, value=100.59, key="inv_tpsa")
-        fixed_m_mp = st.number_input("Melting Point (°C)", min_value=5
+        fixed_m_mp = st.number_input("Melting Point (°C)", min_value=50.0, max_value=400.0, value=267.5, key="inv_mp")
+    with col_f2:
+        fixed_m_ha = st.number_input("H-Bond Acceptors Count", min_value=0, max_value=25, value=6, step=1, key="inv_ha")
+        fixed_m_hd = st.number_input("H-Bond Donors Count", min_value=0, max_value=12, value=3, step=1, key="inv_hd")
+        fixed_m_het = st.number_input("Heteroatoms Count", min_value=0, max_value=30, value=9, step=1, key="inv_het")
+        fixed_s_pol = st.number_input("Solvent Polarity Index Baseline", min_value=3.0, max_value=7.0, value=5.1, step=0.1, key="inv_spol")
+
+    # Pass configuration profiles into validation arrays
+    temp_check = pd.DataFrame([[50.0, 1.5, fixed_m_mw, fixed_m_logp, fixed_m_tpsa, fixed_m_mp, fixed_m_ha, fixed_m_hd, fixed_m_het, 0.1, 0.5, 18.0, 4.0, 0, fixed_s_pol]], columns=FEATURE_COLUMNS)
+    validate_input_distribution(temp_check)
+
+    st.markdown("#### 🚀 Step 2: Generate Lab Formulation Strategy")
+    if st.button("🚀 Run High-Accuracy Recipe Optimization Loop"):
+        with st.spinner("Optuna engine executing cross-validation ensemble optimization..."):
+            
+            model_stack = all_models["Stacking Ensemble"]
+            model_rf = all_models["Random Forest Regressor"]
+            model_gbr = all_models["Gradient Boosting Regressor"]
+
+            def objective(trial):
+                polymer_MW = trial.suggest_float("polymer_MW", 2.4, 98.0)
+                LA_GA = trial.suggest_float("LA_GA", 1.0, 3.0)
+                drug_polymer = trial.suggest_float("drug_polymer", 0.006, 1.0)
+                surfactant_concentration = trial.suggest_float("surfactant_concentration", 0.02, 2.0)
+                surfactant_HLB = trial.suggest_float("surfactant_HLB", 13.0, 29.0)  
+                aqueous_organic = trial.suggest_float("aqueous_organic", 1.78, 16.0)
+                pH = trial.suggest_float("pH", -2.0, 1.0)
+
+                trial_df = pd.DataFrame([{
+                    'polymer_MW': polymer_MW, 'LA/GA': LA_GA, 'mol_MW': fixed_m_mw,
+                    'mol_logP': fixed_m_logp, 'mol_TPSA': fixed_m_tpsa, 'mol_melting_point': fixed_m_mp,
+                    'mol_Hacceptors': int(fixed_m_ha), 'mol_Hdonors': int(fixed_m_hd), 'mol_heteroatoms': int(fixed_m_het),
+                    'drug/polymer': drug_polymer, 'surfactant_concentration': surfactant_concentration,
+                    'surfactant_HLB': surfactant_HLB, 'aqueous/organic': aqueous_organic, 'pH': pH,
+                    'solvent_polarity_index': fixed_s_pol
+                }])
+
+                pred_stack = model_stack.predict(trial_df)[0]
+                pred_rf = model_rf.predict(trial_df)[0]
+                pred_gbr = model_gbr.predict(trial_df)[0]
+                
+                trial.set_user_attr("predicted_size", pred_stack)
+                error_stack = abs(pred_stack - target_size)
+                disagreement_penalty = np.std([pred_stack, pred_rf, pred_gbr])
+
+                return error_stack + (disagreement_penalty * 1.5)
+
+            study = optuna.create_study(direction="minimize")
+            study.optimize(objective, n_trials=500)
+
+            best_recipe_params = study.best_params
+            final_pred_size = study.best_trial.user_attrs["predicted_size"]
+            deviation_error = study.best_value
+
+            st.success("🎯 Optimal Recipe Successfully Determined!")
+            
+            # Map optimized configuration arrays
+            opt_df = pd.DataFrame([{
+                'polymer_MW': best_recipe_params.get('polymer_MW'), 'LA/GA': best_recipe_params.get('LA_GA'), 'mol_MW': fixed_m_mw,
+                'mol_logP': fixed_m_logp, 'mol_TPSA': fixed_m_tpsa, 'mol_melting_point': fixed_m_mp,
+                'mol_Hacceptors': int(fixed_m_ha), 'mol_Hdonors': int(fixed_m_hd), 'mol_heteroatoms': int(fixed_m_het),
+                'drug/polymer': best_recipe_params.get('drug_polymer'), 'surfactant_concentration': best_recipe_params.get('surfactant_concentration'),
+                'surfactant_HLB': best_recipe_params.get('surfactant_HLB'), 'aqueous/organic': best_recipe_params.get('aqueous_organic'), 'pH': best_recipe_params.get('pH'),
+                'solvent_polarity_index': fixed_s_pol
+            }])
+
+            opt_radar = {
+                "Stacking": round(all_models["Stacking Ensemble"].predict(opt_df)[0], 1),
+                "Random Forest": round(all_models["Random Forest Regressor"].predict(opt_df)[0], 1),
+                "GradBoost": round(all_models["Gradient Boosting Regressor"].predict(opt_df)[0], 1),
+                "ExtraTrees": round(all_models["Extra Trees Regressor"].predict(opt_df)[0], 1),
+                "XGBoost": round(all_models["XGBoost Regressor"].predict(opt_df)[0], 1)
+            }
+            opt_conf_msg, opt_conf_type = calculate_confidence_tier(list(opt_radar.values()))
+
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                st.metric("Ensemble Predicted Size", f"{final_pred_size:.2f} nm")
+                st.metric("Target Deviation Margin", f"{deviation_error:.4f} nm")
+                if opt_conf_type == "success": st.success(opt_conf_msg)
+                elif opt_conf_type == "warning": st.warning(opt_conf_msg)
+                else: st.error(opt_conf_msg)
+            with col_m2:
+                st.pyplot(draw_radar_chart(opt_radar))
+
+            recipe_df = pd.DataFrame({
+                "Parameter Description": [
+                    "Polymer Molecular Weight (kDa)", "LA/GA Ratio", "Drug/Polymer Ratio",
+                    "Surfactant Concentration (%)", "Surfactant HLB Value", "Aqueous/Organic Phase Ratio",
+                    "Target Process pH (Coded)", "Solvent Polarity Index"
+                ],
+                "Engine Value Output": [
+                    f"{best_recipe_params.get('polymer_MW'):.1f}", f"{best_recipe_params.get('LA_GA'):.2f}", f"{best_recipe_params.get('drug_polymer'):.3f}",
+                    f"{best_recipe_params.get('surfactant_concentration'):.2f}%", f"{best_recipe_params.get('surfactant_HLB'):.1f}", f"{best_recipe_params.get('aqueous_organic'):.2f}",
+                    f"{best_recipe_params.get('pH'):.1f}", f"{fixed_s_pol:.1f}"
+                ]
+            })
+            st.table(recipe_df)
+
+            st.write("---")
+            render_adaptive_shap(model_stack, "Stacking Ensemble", opt_df)
+
+            # Automated Export CSV Processing Configuration Block
+            csv_data = recipe_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download This Lab Recipe (CSV)",
+                data=csv_data,
+                file_name=f"PLGA_AI_Recipe_{target_size}nm.csv",
+                mime="text/csv"
+            )
