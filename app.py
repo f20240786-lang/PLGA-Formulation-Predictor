@@ -95,9 +95,10 @@ def render_adaptive_shap(model, model_name, input_df):
             if len(shap_values.shape) > 1 and shap_values.shape[0] == 1:
                 shap_values = shap_values[0]
         else:
-            # Stacking and SVR fall back cleanly to a local Kernel/Permutation signature
+            # Stacking and SVR fall back cleanly to a permutation-style explanation vector
             explainer = shap.Explainer(model.predict, input_df)
-            shap_values = explainer(input_df).values[0]
+            shap_result = explainer(input_df)
+            shap_values = shap_result.values[0] if hasattr(shap_result, "values") else shap_result[0]
 
         # Draw plot safely
         fig, ax = plt.subplots(figsize=(6, 3.5))
@@ -258,63 +259,4 @@ with tab2:
             study = optuna.create_study(direction="minimize")
             study.optimize(objective, n_trials=500)
 
-            best_recipe_params = study.best_params
-            final_pred_size = study.best_trial.user_attrs["predicted_size"]
-            deviation_error = study.best_value
-
-            st.success("🎯 Optimal Recipe Successfully Determined!")
-            
-            # Form final optimized row dataset to calculate consensus mapping
-            opt_df = pd.DataFrame([{
-                'polymer_MW': best_recipe_params.get('polymer_MW'), 'LA/GA': best_recipe_params.get('LA_GA'), 'mol_MW': fixed_m_mw,
-                'mol_logP': fixed_m_logp, 'mol_TPSA': fixed_m_tpsa, 'mol_melting_point': fixed_m_mp,
-                'mol_Hacceptors': int(fixed_m_ha), 'mol_Hdonors': int(fixed_m_hd), 'mol_heteroatoms': int(fixed_m_het),
-                'drug/polymer': best_recipe_params.get('drug_polymer'), 'surfactant_concentration': best_recipe_params.get('surfactant_concentration'),
-                'surfactant_HLB': best_recipe_params.get('surfactant_HLB'), 'aqueous/organic': best_recipe_params.get('aqueous_organic'), 'pH': best_recipe_params.get('pH'),
-                'solvent_polarity_index': fixed_s_pol
-            }])
-
-            opt_radar = {
-                "Stacking": round(all_models["Stacking Ensemble"].predict(opt_df)[0], 1),
-                "Random Forest": round(all_models["Random Forest Regressor"].predict(opt_df)[0], 1),
-                "GradBoost": round(all_models["Gradient Boosting Regressor"].predict(opt_df)[0], 1),
-                "ExtraTrees": round(all_models["Extra Trees Regressor"].predict(opt_df)[0], 1),
-                "XGBoost": round(all_models["XGBoost Regressor"].predict(opt_df)[0], 1)
-            }
-            opt_conf_msg, opt_conf_type = calculate_confidence_tier(list(opt_radar.values()))
-
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                st.metric("Ensemble Predicted Size", f"{final_pred_size:.2f} nm")
-                st.metric("Target Deviation Margin", f"{deviation_error:.4f} nm")
-                if opt_conf_type == "success": st.success(opt_conf_msg)
-                elif opt_conf_type == "warning": st.warning(opt_conf_msg)
-                else: st.error(opt_conf_msg)
-            with col_m2:
-                st.pyplot(draw_radar_chart(opt_radar))
-
-            recipe_df = pd.DataFrame({
-                "Parameter Description": [
-                    "Polymer Molecular Weight (kDa)", "LA/GA Ratio", "Drug/Polymer Ratio",
-                    "Surfactant Concentration (%)", "Surfactant HLB Value", "Aqueous/Organic Phase Ratio",
-                    "Target Process pH (Coded)", "Solvent Polarity Index"
-                ],
-                "Engine Value Output": [
-                    f"{best_recipe_params.get('polymer_MW'):.1f}", f"{best_recipe_params.get('LA_GA'):.2f}", f"{best_recipe_params.get('drug_polymer'):.3f}",
-                    f"{best_recipe_params.get('surfactant_concentration'):.2f}%", f"{best_recipe_params.get('surfactant_HLB'):.1f}", f"{best_recipe_params.get('aqueous_organic'):.2f}",
-                    f"{best_recipe_params.get('pH'):.1f}", f"{fixed_s_pol:.1f}"
-                ]
-            })
-            st.table(recipe_df)
-
-            st.write("---")
-            render_adaptive_shap(model_stack, "Stacking Ensemble", opt_df)
-
-            # Instant CSV Download button
-            csv_data = recipe_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download This Lab Recipe (CSV)",
-                data=csv_data,
-                file_name=f"PLGA_AI_Recipe_{target_size}nm.csv",
-                mime="text/csv"
-            )
+            best_recipe_params = study.
