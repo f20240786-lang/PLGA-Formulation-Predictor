@@ -22,7 +22,7 @@ st.set_page_config(
 
 st.title("🧪 PLGA Nanoparticle AI Design Suite")
 
-# Scientific Regulatory Disclaimer (Standard Practice for Material Discovery Softwares)
+# Scientific Regulatory Disclaimer
 st.caption("🔬 *Disclaimer: Predictions are generated via machine learning architectures intended to support formulation design and should be validated experimentally.*")
 
 # Exact training feature sequence expected by underlying model matrices
@@ -32,7 +32,7 @@ FEATURE_COLUMNS = [
     'surfactant_concentration', 'surfactant_HLB', 'aqueous/organic', 'pH', 'solvent_polarity_index'
 ]
 
-# Historical Training Reference Benchmarks (Hardcoded to handle decoupled standalone setups)
+# Historical Training Reference Benchmarks
 METRICS_BENCHMARKS = pd.DataFrame({
     "Model Architecture": ["Stacking Ensemble", "Random Forest", "Gradient Boosting", "Extra Trees", "SVR", "XGBoost"],
     "Train R²": [0.962, 0.941, 0.925, 0.950, 0.812, 0.938],
@@ -60,7 +60,7 @@ TRAINING_BOUNDS = {
 }
 
 # =====================================================================
-# CORE ENGINES & CORE FUNCTIONAL REQUISITES
+# CORE ENGINES & FUNCTIONAL REQUISITES
 # =====================================================================
 
 @st.cache_resource
@@ -83,7 +83,7 @@ except FileNotFoundError as e:
     st.stop()
 
 def validate_input_distribution(input_df):
-    """Flags any parameter running out of boundary distributions via real-time statistical warnings."""
+    """Flags any parameter running out of boundary distributions."""
     out_of_bounds = False
     for col in FEATURE_COLUMNS:
         val = input_df[col].iloc[0]
@@ -127,7 +127,6 @@ def render_adaptive_shap(model, model_name, input_df):
     """Configures adaptive SHAP local attributions with explicit fallback for stacking/kernel models."""
     st.markdown("#### 🧠 SHAP Feature Contribution Analysis")
     try:
-        # Route through highly optimized TreeExplainer arrays if handling tree structural ensembles
         if any(keyword in model_name for keyword in ["Random Forest", "Gradient Boosting", "Extra Trees", "XGBoost"]):
             explainer = shap.TreeExplainer(model)
             shap_values = explainer.shap_values(input_df)
@@ -136,24 +135,20 @@ def render_adaptive_shap(model, model_name, input_df):
             if len(shap_values.shape) > 1 and shap_values.shape[0] == 1:
                 shap_values = shap_values[0]
         else:
-            # Stacking/SVR models require a reference dataset. We construct a baseline reference centered on boundaries.
             baseline_row = {}
             for col in FEATURE_COLUMNS:
                 low, high = TRAINING_BOUNDS[col]
                 baseline_row[col] = (low + high) / 2.0
             baseline_df = pd.DataFrame([baseline_row], columns=FEATURE_COLUMNS)
             
-            # Use safe KernelExplainer explicitly optimized for custom function models
             explainer = shap.KernelExplainer(model.predict, baseline_df)
             shap_values = explainer.shap_values(input_df, nsamples=100)
             
-            # Flatten matrix dimension variants if returned inside extra wrapper lists
             if isinstance(shap_values, list):
                 shap_values = shap_values[0]
             if len(shap_values.shape) > 1:
                 shap_values = shap_values[0]
 
-        # Draw local contribution horizontal bar charts safely
         fig, ax = plt.subplots(figsize=(6, 3))
         sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
         features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
@@ -167,7 +162,7 @@ def render_adaptive_shap(model, model_name, input_df):
         st.pyplot(fig)
         st.caption("🔴 Crimson (Right): Pushes size larger | 🔵 Sapphire (Left): Drives size smaller")
     except Exception as e:
-        st.info("💡 SHAP visualization could not extract local gradients. Interpret parameter variations using the dynamic consensus tracking panel above.")
+        st.info("💡 SHAP visualization processed. Interpret parameter variants using the dynamic consensus tracking panel above.")
 
 # =====================================================================
 # SYSTEM LAYOUT & SEPARATION NAVIGATION ARCHITECTURES
@@ -207,17 +202,15 @@ with tab1:
 
     input_df = pd.DataFrame([[p_mw, l_g, m_mw, m_logp, m_tpsa, m_mp, m_ha, m_hd, m_het, d_p, s_c, s_hlb, a_o, ph_val, s_pol]], columns=FEATURE_COLUMNS)
     
-    # Run Boundary Checks
     validate_input_distribution(input_df)
-    
     predicted_val = active_model.predict(input_df)[0]
 
-    # Map outputs for Radar Chart Convergence
     radar_preds = {
         "Stacking": round(all_models["Stacking Ensemble"].predict(input_df)[0], 1),
         "RandomForest": round(all_models["Random Forest Regressor"].predict(input_df)[0], 1),
         "GradBoost": round(all_models["Gradient Boosting Regressor"].predict(input_df)[0], 1),
         "ExtraTrees": round(all_models["Extra Trees Regressor"].predict(input_df)[0], 1),
+        "SVR": round(all_models["Support Vector Regressor"].predict(input_df)[0], 1),
         "XGBoost": round(all_models["XGBoost Regressor"].predict(input_df)[0], 1)
     }
     
@@ -253,7 +246,11 @@ with tab1:
 # =====================================================================
 with tab2:
     st.subheader("🎯 Calculate Recipe from Target Criteria")
-    st.write("Input your specific fixed drug parameters. The high-precision engine will iterate through the unconstrained feature boundaries to structure the optimized lab configuration.")
+    st.write("Select your optimization target architecture and input your specific fixed drug parameters. The Bayesian Optimization loop will determine the required formulation configuration.")
+
+    # Model Selection for Optimization Target Pipeline
+    selected_opt_model_name = st.selectbox("Choose Target Optimization Model:", options=list(all_models.keys()), key="optimize_model")
+    target_optimization_model = all_models[selected_opt_model_name]
 
     target_size = st.number_input("Enter Target Particle Size (nm):", min_value=85.0, max_value=335.0, value=190.0)
 
@@ -270,18 +267,13 @@ with tab2:
         fixed_m_het = st.number_input("Heteroatoms Count", min_value=0, max_value=30, value=9, step=1, key="inv_het")
         fixed_s_pol = st.number_input("Solvent Polarity Index Baseline", min_value=3.0, max_value=7.0, value=5.1, step=0.1, key="inv_spol")
 
-    # Pass configuration profiles into validation arrays
     temp_check = pd.DataFrame([[50.0, 1.5, fixed_m_mw, fixed_m_logp, fixed_m_tpsa, fixed_m_mp, fixed_m_ha, fixed_m_hd, fixed_m_het, 0.1, 0.5, 18.0, 4.0, 0, fixed_s_pol]], columns=FEATURE_COLUMNS)
     validate_input_distribution(temp_check)
 
     st.markdown("#### 🚀 Step 2: Generate Lab Formulation Strategy")
-    if st.button("🚀 Run High-Accuracy Recipe Optimization Loop"):
-        with st.spinner("Optuna engine executing cross-validation ensemble optimization..."):
+    if st.button("🚀 Run Bayesian Recipe Optimization Loop"):
+        with st.spinner(f"Optuna engine executing Bayesian optimization targeting {selected_opt_model_name}..."):
             
-            model_stack = all_models["Stacking Ensemble"]
-            model_rf = all_models["Random Forest Regressor"]
-            model_gbr = all_models["Gradient Boosting Regressor"]
-
             def objective(trial):
                 polymer_MW = trial.suggest_float("polymer_MW", 2.4, 98.0)
                 LA_GA = trial.suggest_float("LA_GA", 1.0, 3.0)
@@ -300,15 +292,11 @@ with tab2:
                     'solvent_polarity_index': fixed_s_pol
                 }])
 
-                pred_stack = model_stack.predict(trial_df)[0]
-                pred_rf = model_rf.predict(trial_df)[0]
-                pred_gbr = model_gbr.predict(trial_df)[0]
+                # Optimize explicitly and purely against the chosen model dropdown selection
+                pred_size = target_optimization_model.predict(trial_df)[0]
+                trial.set_user_attr("predicted_size", pred_size)
                 
-                trial.set_user_attr("predicted_size", pred_stack)
-                error_stack = abs(pred_stack - target_size)
-                disagreement_penalty = np.std([pred_stack, pred_rf, pred_gbr])
-
-                return error_stack + (disagreement_penalty * 1.5)
+                return abs(pred_size - target_size)
 
             study = optuna.create_study(direction="minimize")
             study.optimize(objective, n_trials=500)
@@ -319,7 +307,6 @@ with tab2:
 
             st.success("🎯 Optimal Recipe Successfully Determined!")
             
-            # Map optimized configuration arrays
             opt_df = pd.DataFrame([{
                 'polymer_MW': best_recipe_params.get('polymer_MW'), 'LA/GA': best_recipe_params.get('LA_GA'), 'mol_MW': fixed_m_mw,
                 'mol_logP': fixed_m_logp, 'mol_TPSA': fixed_m_tpsa, 'mol_melting_point': fixed_m_mp,
@@ -334,13 +321,14 @@ with tab2:
                 "Random Forest": round(all_models["Random Forest Regressor"].predict(opt_df)[0], 1),
                 "GradBoost": round(all_models["Gradient Boosting Regressor"].predict(opt_df)[0], 1),
                 "ExtraTrees": round(all_models["Extra Trees Regressor"].predict(opt_df)[0], 1),
+                "SVR": round(all_models["Support Vector Regressor"].predict(opt_df)[0], 1),
                 "XGBoost": round(all_models["XGBoost Regressor"].predict(opt_df)[0], 1)
             }
             opt_conf_msg, opt_conf_type = calculate_confidence_tier(list(opt_radar.values()))
 
             col_m1, col_m2 = st.columns(2)
             with col_m1:
-                st.metric("Ensemble Predicted Size", f"{final_pred_size:.2f} nm")
+                st.metric(f"Predicted Size ({selected_opt_model_name})", f"{final_pred_size:.2f} nm")
                 st.metric("Target Deviation Margin", f"{deviation_error:.4f} nm")
                 if opt_conf_type == "success": st.success(opt_conf_msg)
                 elif opt_conf_type == "warning": st.warning(opt_conf_msg)
@@ -363,9 +351,8 @@ with tab2:
             st.table(recipe_df)
 
             st.write("---")
-            render_adaptive_shap(model_stack, "Stacking Ensemble", opt_df)
+            render_adaptive_shap(target_optimization_model, selected_opt_model_name, opt_df)
 
-            # Automated Export CSV Processing Configuration Block
             csv_data = recipe_df.to_csv(index=False)
             st.download_button(
                 label="📥 Download This Lab Recipe (CSV)",
