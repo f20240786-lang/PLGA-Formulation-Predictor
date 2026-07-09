@@ -124,30 +124,67 @@ def draw_radar_chart(predictions_dict):
     return fig
     
 def render_adaptive_shap(model, model_name, input_df):
-    """The Ultimate Emergency Diagnostic Test."""
-    st.markdown("#### 🚨 SVR Debugger Terminal")
-    
-    # If it's a tree model, let it run normally
-    if "Regressor" in model_name and "Support Vector" not in model_name:
-        st.success(f"✅ {model_name} is running normally.")
-        return
-        
-    # If it is the SVR model, force it to speak or throw a visible error
+    """
+    Configures adaptive SHAP local attributions.
+    Uses high-speed TreeSHAP for tree ensembles and KernelSHAP with a 
+    synthetic midpoint background reference dataset for SVR/Stacking models.
+    """
+    st.markdown("#### 🧠 SHAP Feature Contribution Analysis")
     try:
-        st.write("1. Testing model type...")
-        st.write(f"Model class type: `{type(model)}`")
+        # PIPELINE A: Tree-based models (Random Forest, XGBoost, Gradient Boosting, Extra Trees)
+        if any(keyword in model_name for keyword in ["Random Forest", "Gradient Boosting", "Extra Trees", "XGBoost"]):
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(input_df)
+            
+            # Clean up potential multi-class or batch dimensions from TreeSHAP outputs
+            if isinstance(shap_values, list): 
+                shap_values = shap_values[1] if len(shap_values) > 1 else shap_values[0]
+            if len(shap_values.shape) > 1 and shap_values.shape[0] == 1:
+                shap_values = shap_values[0]
+                
+        # PIPELINE B: Model-agnostic fallback for Stacking and Support Vector Regressor (SVR)
+        else:
+            # Generate a 1-row synthetic background baseline using midpoints of operational training bounds
+            baseline_row = {}
+            for col in FEATURE_COLUMNS:
+                low, high = TRAINING_BOUNDS[col]
+                baseline_row[col] = (low + high) / 2.0
+            baseline_df = pd.DataFrame([baseline_row], columns=FEATURE_COLUMNS)
+            
+            # Initialize KernelExplainer with the custom background anchor
+            explainer = shap.KernelExplainer(model.predict, baseline_df)
+            shap_values = explainer.shap_values(input_df, nsamples=100)
+            
+            # CRITICAL FIXED SVR MATRIX PROCESSING:
+            # Handle the list returned by KernelExplainer and completely flatten 
+            # nested multi-dimensional arrays into a strict 1D vector for Matplotlib compatibility.
+            if isinstance(shap_values, list):
+                shap_values = shap_values[0]
+            shap_values = np.array(shap_values).flatten()
+
+        # MATPLOTLIB RENDERING PIPELINE (Guaranteed 1D input array map)
+        fig, ax = plt.subplots(figsize=(6, 3))
         
-        st.write("2. Sending data to SVR model matrix...")
-        test_pred = model.predict(input_df)
+        # Sort features based on their absolute impact weights to isolate the top 7
+        sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
+        features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
+        weights_to_plot = [shap_values[i] for i in sorted_idx]
         
-        st.write("3. Checking prediction shape...")
-        st.write(f"Raw array returned: `{test_pred}`")
+        # Set colors: Crimson (#ff0051) for positive size impacts, Sapphire (#008bfb) for negative size impacts
+        colors = ['#ff0051' if w >= 0 else '#008bfb' for w in weights_to_plot]
         
-        st.success(f"🎉 SVR is alive! Prediction: {test_pred[0]:.2f} nm")
+        # Build horizontal bar chart
+        ax.barh(features_to_plot[::-1], weights_to_plot[::-1], color=colors[::-1])
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.axvline(x=0, color='gray', linestyle='--', linewidth=0.8) # Reference baseline alignment
         
-    except Exception as raw_error:
-        st.error("💥 THE SVR MODEL IS BROKEN INTERNALLY!")
-        st.error(f"Error details: `{raw_error}`")
+        plt.tight_layout()
+        st.pyplot(fig)
+        st.caption("🔴 Crimson (Right): Pushes size larger | 🔵 Sapphire (Left): Drives size smaller")
+        
+    except Exception as e:
+        st.error(f"⚠️ SHAP Engine Matrix Execution Error: {e}")
 # =====================================================================
 # SYSTEM LAYOUT & SEPARATION NAVIGATION ARCHITECTURES
 # =====================================================================
