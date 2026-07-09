@@ -164,60 +164,65 @@ def render_adaptive_shap(model, model_name, input_df):
     except Exception as e:
         st.info("💡 SHAP visualization processed. Interpret parameter variants using the dynamic consensus tracking panel above.")
 def render_svr_shap_fixed(model, input_df):
-    """Generates a guaranteed, non-empty SHAP plot explicitly for the SVR model."""
-    st.markdown("#### 🧠 SVR SHAP Feature Contribution Analysis")
+    """Generates a guaranteed, standalone feature contribution plot specifically for the SVR model."""
+    st.markdown("#### 🧠 SVR Feature Contribution Analysis")
     try:
-        # 1. Create a multi-row background dataset to provide enough feature variance
-        rows = [
-            {col: (TRAINING_BOUNDS[col][0] + TRAINING_BOUNDS[col][1]) / 2.0 for col in FEATURE_COLUMNS}, # Midpoints
-            {col: TRAINING_BOUNDS[col][0] for col in FEATURE_COLUMNS},                                  # Minimums
-            {col: TRAINING_BOUNDS[col][1] for col in FEATURE_COLUMNS}                                   # Maximums
-        ]
-        background_df = pd.DataFrame(rows, columns=FEATURE_COLUMNS)
+        # 1. Calculate the standard baseline prediction for this current formulation row
+        base_pred = model.predict(input_df)[0]
         
-        # 2. Compute using the standard model-agnostic Explainer pipeline
-        explainer = shap.Explainer(model.predict, background_df)
-        shap_values_obj = explainer(input_df)
+        # 2. Manually track the directional shift of every feature
+        feature_impacts = []
         
-        # Extract the numeric values arrays safely
-        if hasattr(shap_values_obj, "values"):
-            shap_values = shap_values_obj.values
-        else:
-            shap_values = shap_values_obj
+        for col in FEATURE_COLUMNS:
+            # Shift the value by 5% of its total known training range space
+            low, high = TRAINING_BOUNDS[col]
+            range_step = (high - low) * 0.05
             
-        if isinstance(shap_values, list): shap_values = shap_values[0]
-        if len(shap_values.shape) > 1: shap_values = shap_values[0]
-        if len(shap_values.shape) > 1: shap_values = shap_values.flatten()
-
-        # 3. GUARANTEED FALLBACK: If values are completely empty or zero, calculate directional sensitivity manually
-        if np.allclose(shap_values, 0) or np.isnan(shap_values).any():
-            shap_values = np.zeros(len(FEATURE_COLUMNS))
-            base_pred = model.predict(input_df)[0]
+            # Make a copy and apply a forward step nudge
+            perturbed_df = input_df.copy()
+            perturbed_df[col] += range_step
             
-            for i, col in enumerate(FEATURE_COLUMNS):
-                perturbed_df = input_df.copy()
-                # Shift the parameter slightly by 5% of its total operational training range
-                step = (TRAINING_BOUNDS[col][1] - TRAINING_BOUNDS[col][0]) * 0.05
-                perturbed_df[col] += step
-                new_pred = model.predict(perturbed_df)[0]
-                # Measure the direct delta
-                shap_values[i] = new_pred - base_pred
+            # Predict new size and measure the delta path
+            new_pred = model.predict(perturbed_df)[0]
+            delta = new_pred - base_pred
+            feature_impacts.append(delta)
+            
+        # Convert to a stable numpy array format
+        shap_values = np.array(feature_impacts)
 
-        # 4. Render the horizontal bar chart
-        fig, ax = plt.subplots(figsize=(6, 3))
+        # 3. Handle fallback safety check to prevent blank screens if everything is perfectly zero
+        if np.allclose(shap_values, 0):
+            st.info("💡 All features are sitting exactly at the model's local equilibrium point. Try adjusting any parameter slider to view dynamic shifts.")
+            return
+
+        # 4. Filter, sort, and slice the top 7 most influential features
         sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
         features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
         weights_to_plot = [shap_values[i] for i in sorted_idx]
         
+        # 5. Clear previous plots explicitly and draw the clean figure matrix
+        plt.clf() 
+        fig, ax = plt.subplots(figsize=(6, 3))
+        
+        # Map colors (Crimson for size-increasing features, Sapphire for size-decreasing features)
         colors = ['#ff0051' if w >= 0 else '#008bfb' for w in weights_to_plot]
+        
+        # Plot bars horizontally
         ax.barh(features_to_plot[::-1], weights_to_plot[::-1], color=colors[::-1])
+        
+        # Clean up chart borders/spines for a clean production look
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
+        ax.axvline(x=0, color='gray', linestyle='--', linewidth=0.8) # Add zero center guideline
+        
         plt.tight_layout()
+        
+        # 6. Push to Streamlit app dashboard canvas
         st.pyplot(fig)
         st.caption("🔴 Positive Impact: Increases predicted size | 🔵 Negative Impact: Decreases predicted size")
+        
     except Exception as e:
-        st.error(f"⚠️ SHAP calculation error: {e}")
+        st.error(f"⚠️ Visualization rendering error: {e}")
 # =====================================================================
 # SYSTEM LAYOUT & SEPARATION NAVIGATION ARCHITECTURES
 # =====================================================================
