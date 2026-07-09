@@ -163,7 +163,37 @@ def render_adaptive_shap(model, model_name, input_df):
         st.caption("🔴 Crimson (Right): Pushes size larger | 🔵 Sapphire (Left): Drives size smaller")
     except Exception as e:
         st.info("💡 SHAP visualization processed. Interpret parameter variants using the dynamic consensus tracking panel above.")
+def render_svr_shap(model, input_df):
+    """Generates a clean SHAP plot explicitly for the SVR model using a synthetic baseline."""
+    st.markdown("#### 🧠 SVR SHAP Feature Contribution Analysis")
+    try:
+        # Create a single-row baseline using the midpoints of your training boundaries
+        baseline_row = {col: (TRAINING_BOUNDS[col][0] + TRAINING_BOUNDS[col][1]) / 2.0 for col in FEATURE_COLUMNS}
+        baseline_df = pd.DataFrame([baseline_row], columns=FEATURE_COLUMNS)
+        
+        # Initialize KernelExplainer backed by the synthetic baseline anchor
+        explainer = shap.KernelExplainer(model.predict, baseline_df)
+        shap_values = explainer.shap_values(input_df, nsamples=100)
+        
+        # Clean up nested array dimensions if returned by KernelExplainer
+        if isinstance(shap_values, list): shap_values = shap_values[0]
+        if len(shap_values.shape) > 1: shap_values = shap_values[0]
 
+        # Render the custom horizontal local contribution chart
+        fig, ax = plt.subplots(figsize=(6, 3))
+        sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
+        features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
+        weights_to_plot = [shap_values[i] for i in sorted_idx]
+        
+        colors = ['#ff0051' if w >= 0 else '#008bfb' for w in weights_to_plot]
+        ax.barh(features_to_plot[::-1], weights_to_plot[::-1], color=colors[::-1])
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        plt.tight_layout()
+        st.pyplot(fig)
+        st.caption("🔴 Positive Impact: Pushes size larger | 🔵 Negative Impact: Drives size smaller")
+    except Exception as e:
+        st.error(f"⚠️ SHAP calculation error: {e}")
 # =====================================================================
 # SYSTEM LAYOUT & SEPARATION NAVIGATION ARCHITECTURES
 # =====================================================================
