@@ -181,10 +181,6 @@ def render_svr_shap(model, input_df, X_train):
 
         # Compute SHAP values
         shap_values = explainer.shap_values(input_df, nsamples=100)
-        st.write("Prediction:", model.predict(input_df))
-        st.write("SHAP values:", shap_values)
-        st.write("Shape:", np.array(shap_values).shape)
-        st.write("Flattened:", np.array(shap_values).flatten())
 
         values = shap_values.values[0]
 
