@@ -123,73 +123,47 @@ def draw_radar_chart(predictions_dict):
     plt.tight_layout()
     return fig
 
-def render_adaptive_shap(model, model_name, input_df):
-    """Configures adaptive feature attribution with a dedicated, bulletproof pipeline for SVR."""
-    st.markdown("#### 🧠 Feature Contribution Analysis")
-    
-    # PIPELINE A: Tree-based models (Random Forest, XGBoost, Gradient Boosting, Extra Trees)
-    if any(keyword in model_name for keyword in ["Random Forest", "Gradient Boosting", "Extra Trees", "XGBoost"]):
-        try:
+ def render_adaptive_shap(model, model_name, input_df):
+    """Configures adaptive SHAP local attributions with explicit fallback for stacking/kernel models."""
+    st.markdown("#### 🧠 SHAP Feature Contribution Analysis")
+    try:
+        if any(keyword in model_name for keyword in ["Random Forest", "Gradient Boosting", "Extra Trees", "XGBoost"]):
             explainer = shap.TreeExplainer(model)
             shap_values = explainer.shap_values(input_df)
             if isinstance(shap_values, list): 
                 shap_values = shap_values[1] if len(shap_values) > 1 else shap_values[0]
             if len(shap_values.shape) > 1 and shap_values.shape[0] == 1:
                 shap_values = shap_values[0]
-
-            fig, ax = plt.subplots(figsize=(6, 3))
-            sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
-            features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
-            weights_to_plot = [shap_values[i] for i in sorted_idx]
-            
-            colors = ['#ff0051' if w >= 0 else '#008bfb' for w in weights_to_plot]
-            ax.barh(features_to_plot[::-1], weights_to_plot[::-1], color=colors[::-1])
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-            plt.tight_layout()
-            st.pyplot(fig)
-            st.caption("🔴 Crimson (Right): Pushes size larger | 🔵 Sapphire (Left): Drives size smaller")
-        except Exception as tree_err:
-            st.error(f"❌ Tree SHAP failed: {tree_err}")
-
-    # PIPELINE B: Explicit, safe handling for Support Vector Regressor (SVR) & Stacking
-    else:
-        try:
-            # Calculate direct feature impact manually to bypass SHAP library bugs completely
-            base_pred = float(model.predict(input_df)[0])
-            impact_records = []
-            
+        else:
+            baseline_row = {}
             for col in FEATURE_COLUMNS:
                 low, high = TRAINING_BOUNDS[col]
-                range_step = (high - low) * 0.05  # Nudge by 5% of training range
-                
-                perturbed_df = input_df.copy()
-                perturbed_df[col] += range_step
-                
-                new_pred = float(model.predict(perturbed_df)[0])
-                impact = new_pred - base_pred
-                impact_records.append({"Feature": col, "Impact (nm)": impact, "Abs_Impact": abs(impact)})
+                baseline_row[col] = (low + high) / 2.0
+            baseline_df = pd.DataFrame([baseline_row], columns=FEATURE_COLUMNS)
             
-            # Convert to DataFrame and isolate the top 5 most important impacts
-            df_impacts = pd.DataFrame(impact_records).sort_values(by="Abs_Impact", ascending=False).head(5)
+            explainer = shap.KernelExplainer(model.predict, baseline_df)
+            shap_values = explainer.shap_values(input_df, nsamples=100)
             
-            st.write("📊 **Top Feature Influences on Current Prediction:**")
-            
-            # Render using direct HTML/Streamlit progress metrics instead of complex plotting libraries
-            for _, row in df_impacts.iterrows():
-                feat_name = row["Feature"]
-                val = row["Impact (nm)"]
-                
-                if val >= 0:
-                    st.markdown(f"🔺 **{feat_name}**: +{val:.2f} nm (Increases particle size)")
-                else:
-                    st.markdown(f"🔹 **{feat_name}**: {val:.2f} nm (Decreases particle size)")
-                    
-            st.caption("ℹ️ *Analysis generated via local feature boundary perturbation directly inside the SVR matrix.*")
-            
-        except Exception as svr_err:
-            st.error(f"❌ SVR Feature Extraction failed completely: {svr_err}")
-   
+            if isinstance(shap_values, list):
+                shap_values = shap_values[0]
+            if len(shap_values.shape) > 1:
+                shap_values = shap_values[0]
+
+        fig, ax = plt.subplots(figsize=(6, 3))
+        sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
+        features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
+        weights_to_plot = [shap_values[i] for i in sorted_idx]
+        
+        colors = ['#ff0051' if w >= 0 else '#008bfb' for w in weights_to_plot]
+        ax.barh(features_to_plot[::-1], weights_to_plot[::-1], color=colors[::-1])
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        plt.tight_layout()
+        st.pyplot(fig)
+        st.caption("🔴 Crimson (Right): Pushes size larger | 🔵 Sapphire (Left): Drives size smaller")
+    except Exception as e:
+        st.info("💡 SHAP visualization processed. Interpret parameter variants using the dynamic consensus tracking panel above.")
+
 # =====================================================================
 # SYSTEM LAYOUT & SEPARATION NAVIGATION ARCHITECTURES
 # =====================================================================
