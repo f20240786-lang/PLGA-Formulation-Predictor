@@ -122,8 +122,8 @@ def draw_radar_chart(predictions_dict):
     ax.set_xticklabels(categories, fontsize=8, fontweight='bold')
     plt.tight_layout()
     return fig
-
- def render_adaptive_shap(model, model_name, input_df):
+    
+def render_adaptive_shap(model, model_name, input_df):
     """Configures adaptive SHAP local attributions with explicit fallback for stacking/kernel models."""
     st.markdown("#### 🧠 SHAP Feature Contribution Analysis")
     try:
