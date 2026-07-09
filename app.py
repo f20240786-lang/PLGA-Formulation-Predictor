@@ -124,79 +124,72 @@ def draw_radar_chart(predictions_dict):
     return fig
 
 def render_adaptive_shap(model, model_name, input_df):
-    """Configures adaptive SHAP local attributions with explicit fallback for stacking/kernel models."""
-    st.markdown("#### 🧠 SHAP Feature Contribution Analysis")
-    try:
-        if any(keyword in model_name for keyword in ["Random Forest", "Gradient Boosting", "Extra Trees", "XGBoost"]):
+    """Configures adaptive feature attribution with a dedicated, bulletproof pipeline for SVR."""
+    st.markdown("#### 🧠 Feature Contribution Analysis")
+    
+    # PIPELINE A: Tree-based models (Random Forest, XGBoost, Gradient Boosting, Extra Trees)
+    if any(keyword in model_name for keyword in ["Random Forest", "Gradient Boosting", "Extra Trees", "XGBoost"]):
+        try:
             explainer = shap.TreeExplainer(model)
             shap_values = explainer.shap_values(input_df)
             if isinstance(shap_values, list): 
                 shap_values = shap_values[1] if len(shap_values) > 1 else shap_values[0]
             if len(shap_values.shape) > 1 and shap_values.shape[0] == 1:
                 shap_values = shap_values[0]
-        else:
-            baseline_row = {}
+
+            fig, ax = plt.subplots(figsize=(6, 3))
+            sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
+            features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
+            weights_to_plot = [shap_values[i] for i in sorted_idx]
+            
+            colors = ['#ff0051' if w >= 0 else '#008bfb' for w in weights_to_plot]
+            ax.barh(features_to_plot[::-1], weights_to_plot[::-1], color=colors[::-1])
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            plt.tight_layout()
+            st.pyplot(fig)
+            st.caption("🔴 Crimson (Right): Pushes size larger | 🔵 Sapphire (Left): Drives size smaller")
+        except Exception as tree_err:
+            st.error(f"❌ Tree SHAP failed: {tree_err}")
+
+    # PIPELINE B: Explicit, safe handling for Support Vector Regressor (SVR) & Stacking
+    else:
+        try:
+            # Calculate direct feature impact manually to bypass SHAP library bugs completely
+            base_pred = float(model.predict(input_df)[0])
+            impact_records = []
+            
             for col in FEATURE_COLUMNS:
                 low, high = TRAINING_BOUNDS[col]
-                baseline_row[col] = (low + high) / 2.0
-            baseline_df = pd.DataFrame([baseline_row], columns=FEATURE_COLUMNS)
+                range_step = (high - low) * 0.05  # Nudge by 5% of training range
+                
+                perturbed_df = input_df.copy()
+                perturbed_df[col] += range_step
+                
+                new_pred = float(model.predict(perturbed_df)[0])
+                impact = new_pred - base_pred
+                impact_records.append({"Feature": col, "Impact (nm)": impact, "Abs_Impact": abs(impact)})
             
-            explainer = shap.KernelExplainer(model.predict, baseline_df)
-            shap_values = explainer.shap_values(input_df, nsamples=100)
+            # Convert to DataFrame and isolate the top 5 most important impacts
+            df_impacts = pd.DataFrame(impact_records).sort_values(by="Abs_Impact", ascending=False).head(5)
             
-            if isinstance(shap_values, list):
-                shap_values = shap_values[0]
-            if len(shap_values.shape) > 1:
-                shap_values = shap_values[0]
-
-        fig, ax = plt.subplots(figsize=(6, 3))
-        sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
-        features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
-        weights_to_plot = [shap_values[i] for i in sorted_idx]
-        
-        colors = ['#ff0051' if w >= 0 else '#008bfb' for w in weights_to_plot]
-        ax.barh(features_to_plot[::-1], weights_to_plot[::-1], color=colors[::-1])
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        plt.tight_layout()
-        st.pyplot(fig)
-        st.caption("🔴 Crimson (Right): Pushes size larger | 🔵 Sapphire (Left): Drives size smaller")
-    except Exception as e:
-        st.info("💡 SHAP visualization processed. Interpret parameter variants using the dynamic consensus tracking panel above.")
-def render_svr_shap_fixed(model, input_df):
-    """Generates a guaranteed interactive feature impact chart using Streamlit's native graphing engine."""
-    st.markdown("#### 🧠 SVR Feature Impact Analysis")
-    try:
-        # 1. Get the baseline prediction for the current inputs
-        base_pred = float(model.predict(input_df)[0])
-        impact_data = {}
-        
-        # 2. Manually nudge each feature by 5% to see how the SVR reacts
-        for col in FEATURE_COLUMNS:
-            low, high = TRAINING_BOUNDS[col]
-            range_step = (high - low) * 0.05
+            st.write("📊 **Top Feature Influences on Current Prediction:**")
             
-            perturbed_df = input_df.copy()
-            perturbed_df[col] += range_step
+            # Render using direct HTML/Streamlit progress metrics instead of complex plotting libraries
+            for _, row in df_impacts.iterrows():
+                feat_name = row["Feature"]
+                val = row["Impact (nm)"]
+                
+                if val >= 0:
+                    st.markdown(f"🔺 **{feat_name}**: +{val:.2f} nm (Increases particle size)")
+                else:
+                    st.markdown(f"🔹 **{feat_name}**: {val:.2f} nm (Decreases particle size)")
+                    
+            st.caption("ℹ️ *Analysis generated via local feature boundary perturbation directly inside the SVR matrix.*")
             
-            new_pred = float(model.predict(perturbed_df)[0])
-            # Direct change in nanometers
-            impact_data[col] = new_pred - base_pred
-            
-        # 3. Structure the data into a clean DataFrame for Streamlit
-        df_impact = pd.DataFrame(list(impact_data.items()), columns=['Feature', 'Impact on Size (nm)'])
-        
-        # Sort by absolute impact to get the top 7 most influential variables
-        df_impact['Abs_Impact'] = df_impact['Impact on Size (nm)'].abs()
-        df_impact = df_impact.sort_values(by='Abs_Impact', ascending=False).head(7)
-        df_impact = df_impact.set_index('Feature')
-        
-        # 4. Display using Streamlit's built-in chart (No Matplotlib = Cannot render blank!)
-        st.bar_chart(df_impact['Impact on Size (nm)'])
-        st.caption("📈 Upward bars increase predicted particle size | 📉 Downward bars decrease predicted particle size")
-        
-    except Exception as e:
-        st.error(f"⚠️ Visualization rendering error: {e}")
+        except Exception as svr_err:
+            st.error(f"❌ SVR Feature Extraction failed completely: {svr_err}")
+   
 # =====================================================================
 # SYSTEM LAYOUT & SEPARATION NAVIGATION ARCHITECTURES
 # =====================================================================
