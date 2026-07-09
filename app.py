@@ -125,47 +125,49 @@ def draw_radar_chart(predictions_dict):
     
 def render_adaptive_shap(model, model_name, input_df):
     """
-    Configures adaptive SHAP local attributions.
-    Uses high-speed TreeSHAP for tree ensembles and KernelSHAP with a 
-    synthetic midpoint background reference dataset for SVR/Stacking models.
+    Configures adaptive feature attribution.
+    Uses high-speed TreeSHAP for tree ensembles and an airtight manual perturbation 
+    pipeline for SVR/Stacking to completely bypass SHAP engine/matrix bugs.
     """
-    st.markdown("#### 🧠 SHAP Feature Contribution Analysis")
+    st.markdown("#### 🧠 Feature Contribution Analysis")
     try:
         # PIPELINE A: Tree-based models (Random Forest, XGBoost, Gradient Boosting, Extra Trees)
         if any(keyword in model_name for keyword in ["Random Forest", "Gradient Boosting", "Extra Trees", "XGBoost"]):
             explainer = shap.TreeExplainer(model)
             shap_values = explainer.shap_values(input_df)
             
-            # Clean up potential multi-class or batch dimensions from TreeSHAP outputs
             if isinstance(shap_values, list): 
                 shap_values = shap_values[1] if len(shap_values) > 1 else shap_values[0]
             if len(shap_values.shape) > 1 and shap_values.shape[0] == 1:
                 shap_values = shap_values[0]
-                
-        # PIPELINE B: Model-agnostic fallback for Stacking and Support Vector Regressor (SVR)
-        else:
-            # Generate a 1-row synthetic background baseline using midpoints of operational training bounds
-            baseline_row = {}
-            for col in FEATURE_COLUMNS:
-                low, high = TRAINING_BOUNDS[col]
-                baseline_row[col] = (low + high) / 2.0
-            baseline_df = pd.DataFrame([baseline_row], columns=FEATURE_COLUMNS)
             
-            # Initialize KernelExplainer with the custom background anchor
-            explainer = shap.KernelExplainer(model.predict, baseline_df)
-            shap_values = explainer.shap_values(input_df, nsamples=100)
-            
-            # CRITICAL FIXED SVR MATRIX PROCESSING:
-            # Handle the list returned by KernelExplainer and completely flatten 
-            # nested multi-dimensional arrays into a strict 1D vector for Matplotlib compatibility.
-            if isinstance(shap_values, list):
-                shap_values = shap_values[0]
+            # Ensure it's a flat float array
             shap_values = np.array(shap_values).flatten()
 
-        # MATPLOTLIB RENDERING PIPELINE (Guaranteed 1D input array map)
+        # PIPELINE B: Pure Mathematical Perturbation for SVR and Stacking (No SHAP library used!)
+        else:
+            base_pred = float(model.predict(input_df)[0])
+            manual_impacts = []
+            
+            for col in FEATURE_COLUMNS:
+                low, high = TRAINING_BOUNDS[col]
+                range_step = (high - low) * 0.05  # Nudge feature by 5% of its total range
+                
+                perturbed_df = input_df.copy()
+                perturbed_df[col] += range_step
+                
+                new_pred = float(model.predict(perturbed_df)[0])
+                delta = new_pred - base_pred
+                manual_impacts.append(delta)
+                
+            # This is mathematically guaranteed to be a flat, 1D array of floats
+            shap_values = np.array(manual_impacts).flatten()
+
+        # UNIVERSAL MATPLOTLIB RENDERING PIPELINE
+        plt.clf()  # Explicitly clear any lingering figures from previous runs
         fig, ax = plt.subplots(figsize=(6, 3))
         
-        # Sort features based on their absolute impact weights to isolate the top 7
+        # Sort features based on their absolute impact weights to isolate top 7
         sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
         features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
         weights_to_plot = [shap_values[i] for i in sorted_idx]
@@ -184,7 +186,7 @@ def render_adaptive_shap(model, model_name, input_df):
         st.caption("🔴 Crimson (Right): Pushes size larger | 🔵 Sapphire (Left): Drives size smaller")
         
     except Exception as e:
-        st.error(f"⚠️ SHAP Engine Matrix Execution Error: {e}")
+        st.error(f"⚠️ Feature Attribution Engine Error: {e}")
 # =====================================================================
 # SYSTEM LAYOUT & SEPARATION NAVIGATION ARCHITECTURES
 # =====================================================================
