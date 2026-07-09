@@ -164,62 +164,36 @@ def render_adaptive_shap(model, model_name, input_df):
     except Exception as e:
         st.info("💡 SHAP visualization processed. Interpret parameter variants using the dynamic consensus tracking panel above.")
 def render_svr_shap_fixed(model, input_df):
-    """Generates a guaranteed, standalone feature contribution plot specifically for the SVR model."""
-    st.markdown("#### 🧠 SVR Feature Contribution Analysis")
+    """Generates a guaranteed interactive feature impact chart using Streamlit's native graphing engine."""
+    st.markdown("#### 🧠 SVR Feature Impact Analysis")
     try:
-        # 1. Calculate the standard baseline prediction for this current formulation row
-        base_pred = model.predict(input_df)[0]
+        # 1. Get the baseline prediction for the current inputs
+        base_pred = float(model.predict(input_df)[0])
+        impact_data = {}
         
-        # 2. Manually track the directional shift of every feature
-        feature_impacts = []
-        
+        # 2. Manually nudge each feature by 5% to see how the SVR reacts
         for col in FEATURE_COLUMNS:
-            # Shift the value by 5% of its total known training range space
             low, high = TRAINING_BOUNDS[col]
             range_step = (high - low) * 0.05
             
-            # Make a copy and apply a forward step nudge
             perturbed_df = input_df.copy()
             perturbed_df[col] += range_step
             
-            # Predict new size and measure the delta path
-            new_pred = model.predict(perturbed_df)[0]
-            delta = new_pred - base_pred
-            feature_impacts.append(delta)
+            new_pred = float(model.predict(perturbed_df)[0])
+            # Direct change in nanometers
+            impact_data[col] = new_pred - base_pred
             
-        # Convert to a stable numpy array format
-        shap_values = np.array(feature_impacts)
-
-        # 3. Handle fallback safety check to prevent blank screens if everything is perfectly zero
-        if np.allclose(shap_values, 0):
-            st.info("💡 All features are sitting exactly at the model's local equilibrium point. Try adjusting any parameter slider to view dynamic shifts.")
-            return
-
-        # 4. Filter, sort, and slice the top 7 most influential features
-        sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
-        features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
-        weights_to_plot = [shap_values[i] for i in sorted_idx]
+        # 3. Structure the data into a clean DataFrame for Streamlit
+        df_impact = pd.DataFrame(list(impact_data.items()), columns=['Feature', 'Impact on Size (nm)'])
         
-        # 5. Clear previous plots explicitly and draw the clean figure matrix
-        plt.clf() 
-        fig, ax = plt.subplots(figsize=(6, 3))
+        # Sort by absolute impact to get the top 7 most influential variables
+        df_impact['Abs_Impact'] = df_impact['Impact on Size (nm)'].abs()
+        df_impact = df_impact.sort_values(by='Abs_Impact', ascending=False).head(7)
+        df_impact = df_impact.set_index('Feature')
         
-        # Map colors (Crimson for size-increasing features, Sapphire for size-decreasing features)
-        colors = ['#ff0051' if w >= 0 else '#008bfb' for w in weights_to_plot]
-        
-        # Plot bars horizontally
-        ax.barh(features_to_plot[::-1], weights_to_plot[::-1], color=colors[::-1])
-        
-        # Clean up chart borders/spines for a clean production look
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.axvline(x=0, color='gray', linestyle='--', linewidth=0.8) # Add zero center guideline
-        
-        plt.tight_layout()
-        
-        # 6. Push to Streamlit app dashboard canvas
-        st.pyplot(fig)
-        st.caption("🔴 Positive Impact: Increases predicted size | 🔵 Negative Impact: Decreases predicted size")
+        # 4. Display using Streamlit's built-in chart (No Matplotlib = Cannot render blank!)
+        st.bar_chart(df_impact['Impact on Size (nm)'])
+        st.caption("📈 Upward bars increase predicted particle size | 📉 Downward bars decrease predicted particle size")
         
     except Exception as e:
         st.error(f"⚠️ Visualization rendering error: {e}")
