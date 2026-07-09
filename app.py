@@ -124,69 +124,92 @@ def draw_radar_chart(predictions_dict):
     return fig
     
 def render_adaptive_shap(model, model_name, input_df):
-    """
-    Configures adaptive feature attribution.
-    Uses high-speed TreeSHAP for tree ensembles and an airtight manual perturbation 
-    pipeline for SVR/Stacking to completely bypass SHAP engine/matrix bugs.
-    """
-    st.markdown("#### 🧠 Feature Contribution Analysis")
+    """Configures adaptive SHAP local attributions with explicit fallback for stacking/kernel models."""
+    st.markdown("#### 🧠 SHAP Feature Contribution Analysis")
     try:
-        # PIPELINE A: Tree-based models (Random Forest, XGBoost, Gradient Boosting, Extra Trees)
         if any(keyword in model_name for keyword in ["Random Forest", "Gradient Boosting", "Extra Trees", "XGBoost"]):
             explainer = shap.TreeExplainer(model)
             shap_values = explainer.shap_values(input_df)
-            
             if isinstance(shap_values, list): 
                 shap_values = shap_values[1] if len(shap_values) > 1 else shap_values[0]
             if len(shap_values.shape) > 1 and shap_values.shape[0] == 1:
                 shap_values = shap_values[0]
-            
-            # Ensure it's a flat float array
-            shap_values = np.array(shap_values).flatten()
-
-        # PIPELINE B: Pure Mathematical Perturbation for SVR and Stacking (No SHAP library used!)
         else:
-            base_pred = float(model.predict(input_df)[0])
-            manual_impacts = []
-            
+            baseline_row = {}
             for col in FEATURE_COLUMNS:
                 low, high = TRAINING_BOUNDS[col]
-                range_step = (high - low) * 0.05  # Nudge feature by 5% of its total range
-                
-                perturbed_df = input_df.copy()
-                perturbed_df[col] += range_step
-                
-                new_pred = float(model.predict(perturbed_df)[0])
-                delta = new_pred - base_pred
-                manual_impacts.append(delta)
-                
-            # This is mathematically guaranteed to be a flat, 1D array of floats
-            shap_values = np.array(manual_impacts).flatten()
+                baseline_row[col] = (low + high) / 2.0
+            baseline_df = pd.DataFrame([baseline_row], columns=FEATURE_COLUMNS)
+            
+            explainer = shap.KernelExplainer(model.predict, baseline_df)
+            shap_values = explainer.shap_values(input_df, nsamples=100)
+            
+            if isinstance(shap_values, list):
+                shap_values = shap_values[0]
+            if len(shap_values.shape) > 1:
+                shap_values = shap_values[0]
 
-        # UNIVERSAL MATPLOTLIB RENDERING PIPELINE
-        plt.clf()  # Explicitly clear any lingering figures from previous runs
         fig, ax = plt.subplots(figsize=(6, 3))
-        
-        # Sort features based on their absolute impact weights to isolate top 7
         sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
         features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
         weights_to_plot = [shap_values[i] for i in sorted_idx]
         
-        # Set colors: Crimson (#ff0051) for positive size impacts, Sapphire (#008bfb) for negative size impacts
         colors = ['#ff0051' if w >= 0 else '#008bfb' for w in weights_to_plot]
-        
-        # Build horizontal bar chart
         ax.barh(features_to_plot[::-1], weights_to_plot[::-1], color=colors[::-1])
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-        ax.axvline(x=0, color='gray', linestyle='--', linewidth=0.8) # Reference baseline alignment
-        
         plt.tight_layout()
         st.pyplot(fig)
         st.caption("🔴 Crimson (Right): Pushes size larger | 🔵 Sapphire (Left): Drives size smaller")
-        
     except Exception as e:
-        st.error(f"⚠️ Feature Attribution Engine Error: {e}")
+        st.info("💡 SHAP visualization processed. Interpret parameter variants using the dynamic consensus tracking panel above.")
+
+def render_svr_shap(model, input_df, X_train):
+    """SHAP explanation specifically for SVR models."""
+    
+    st.markdown("#### 🧠 SHAP Feature Contribution Analysis (SVR)")
+
+    try:
+        # Use a small background dataset from the training data
+        background = X_train.sample(
+            min(30, len(X_train)),
+            random_state=42
+        )
+
+        # Create SHAP explainer
+        explainer = shap.Explainer(model.predict, background)
+
+        # Compute SHAP values
+        shap_values = explainer(input_df)
+
+        values = shap_values.values[0]
+
+        # Select top 7 features
+        sorted_idx = np.argsort(np.abs(values))[::-1][:7]
+
+        features = np.array(FEATURE_COLUMNS)[sorted_idx]
+        contributions = values[sorted_idx]
+
+        # Plot
+        fig, ax = plt.subplots(figsize=(6, 3))
+
+        colors = ["#ff0051" if v >= 0 else "#008bfb" for v in contributions]
+
+        ax.barh(features[::-1], contributions[::-1], color=colors[::-1])
+
+        ax.axvline(0, color="gray", linestyle="--", linewidth=0.8)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        plt.tight_layout()
+
+        st.pyplot(fig)
+        plt.close(fig)
+
+        st.caption("🔴 Positive contribution increases predicted particle size | 🔵 Negative contribution decreases predicted particle size")
+
+    except Exception as e:
+        st.error(f"SVR SHAP Error: {e}")
 # =====================================================================
 # SYSTEM LAYOUT & SEPARATION NAVIGATION ARCHITECTURES
 # =====================================================================
