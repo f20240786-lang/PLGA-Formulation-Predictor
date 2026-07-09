@@ -163,23 +163,26 @@ def render_adaptive_shap(model, model_name, input_df):
         st.caption("🔴 Crimson (Right): Pushes size larger | 🔵 Sapphire (Left): Drives size smaller")
     except Exception as e:
         st.info("💡 SHAP visualization processed. Interpret parameter variants using the dynamic consensus tracking panel above.")
-def render_svr_shap(model, input_df):
-    """Generates a clean SHAP plot explicitly for the SVR model using a synthetic baseline."""
+def render_svr_shap_fixed(model, input_df):
+    """Generates a working SHAP plot explicitly for the SVR model by forcing a 2D prediction array."""
     st.markdown("#### 🧠 SVR SHAP Feature Contribution Analysis")
     try:
         # Create a single-row baseline using the midpoints of your training boundaries
         baseline_row = {col: (TRAINING_BOUNDS[col][0] + TRAINING_BOUNDS[col][1]) / 2.0 for col in FEATURE_COLUMNS}
         baseline_df = pd.DataFrame([baseline_row], columns=FEATURE_COLUMNS)
         
-        # Initialize KernelExplainer backed by the synthetic baseline anchor
-        explainer = shap.KernelExplainer(model.predict, baseline_df)
+        # CRITICAL FIX: Wrap predict in a lambda function to force a 2D matrix shape output for SHAP
+        predict_matrix_fn = lambda x: np.array(model.predict(x)).reshape(-1, 1)
+        
+        # Initialize KernelExplainer with our fixed shape predictor function
+        explainer = shap.KernelExplainer(predict_matrix_fn, baseline_df)
         shap_values = explainer.shap_values(input_df, nsamples=100)
         
-        # Clean up nested array dimensions if returned by KernelExplainer
+        # Strip away nested matrix wrappers safely
         if isinstance(shap_values, list): shap_values = shap_values[0]
-        if len(shap_values.shape) > 1: shap_values = shap_values[0]
+        if len(shap_values.shape) > 1: shap_values = shap_values.flatten()
 
-        # Render the custom horizontal local contribution chart
+        # Render the horizontal bar chart
         fig, ax = plt.subplots(figsize=(6, 3))
         sorted_idx = np.argsort(np.abs(shap_values))[::-1][:7] 
         features_to_plot = [FEATURE_COLUMNS[i] for i in sorted_idx]
